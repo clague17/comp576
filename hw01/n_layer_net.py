@@ -1,206 +1,222 @@
-import os
-import time
-import tensorflow as tf
+from three_layer_neural_network import NeuralNetwork, ACTIVATIONS, dACTIVATIONS, generate_data
+from sklearn import datasets, linear_model
+import matplotlib.pyplot as plt
+import numpy as np
 
-# Load MNIST dataset
-from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
-
-# mnist_train, mnist_test = tf.keras.datasets.mnist.load_data()
-
-
-# Import Tensorflow and start a session
-sess = tf.InteractiveSession()
-
-def weight_variable(shape):
+def get_circles():
     '''
-    Initialize weights
-    :param shape: shape of weights, e.g. [w, h ,Cin, Cout] where
-    w: width of the filters
-    h: height of the filters
-    Cin: the number of the channels of the filters
-    Cout: the number of filters
-    :return: a tensor variable for weights with initial values
+    generate data
+    :return: X: input data, y: given labels
     '''
-    return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
-    # IMPLEMENT YOUR WEIGHT_VARIABLE HERE
+    np.random.seed(0)
+    X, y = datasets.make_circles(200, noise=.20)
+    # X, y = datasets.make_moons(200, noise=0.20)  # An array with 200 samples
+    return X, y
 
-def bias_variable(shape):
-    '''
-    Initialize biases
-    :param shape: shape of biases, e.g. [Cout] where
-    Cout: the number of filters
-    :return: a tensor variable for biases with initial values
-    '''
 
-    # IMPLEMENT YOUR BIAS_VARIABLE HERE
-    return tf.Variable(tf.constant(.01, shape=shape))
+class Layer(object):
 
-def conv2d(x, W):
-    '''
-    Perform 2-D convolution
-    :param x: input tensor of size [N, W, H, Cin] where
-    N: the number of images
-    W: width of images
-    H: height of images
-    Cin: the number of channels of images
-    :param W: weight tensor [w, h, Cin, Cout]
-    w: width of the filters
-    h: height of the filters
-    Cin: the number of the channels of the filters = the number of channels of images
-    Cout: the number of filters
-    :return: a tensor of features extracted by the filters, a.k.a. the results after convolution
-    '''
+    def __init__(self, input, output, actFun_type="tanh", reg_lambda=.01, seed=0):
+        """
+        The class for a single Layer in the net
+        :param nn_dim: the dimension of the neural net
+        :param prev_dim: the dimension of the previous layer
+        :param actFun_type: the activation function we are using
+        :param reg_lambda:
+        """
+        self.input = input
+        self.output = output
+        np.random.seed(seed)
+        self.actFun_type = actFun_type
+        self.diff_actFun = dACTIVATIONS[actFun_type]
+        self.reg_lambda = reg_lambda
+        # Initiliaze the weights and bias for this Layer
+        self.W = np.random.randn(self.input, self.output) / np.sqrt(self.input)
+        self.b = np.zeros((1, self.output))
+        # Defining all my variables
+        self.X = None
+        self.z = None
+        self.a = None
+        self.dW = None
+        self.db = None
 
-    # IMPLEMENT YOUR CONV2D HERE
-    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+    def actFun(self, z):
+        '''
+        actFun computes the activation functions
+        :param z: net input
+        :return: activations
+        '''
 
-def max_pool_2x2(x):
-    '''
-    Perform non-overlapping 2-D maxpooling on 2x2 regions in the input data
-    :param x: input data
-    :return: the results of maxpooling (max-marginalized + downsampling)
-    '''
+        return ACTIVATIONS[self.actFun_type](z)
 
-    # IMPLEMENT YOUR MAX_POOL_2X2 HERE
-    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
-                          strides=[1, 2, 2, 1], padding='SAME')
+    def feedforward(self, X):
+        """
+        feedforward builds a layer of neurons and computes one probability
+        :param X: input data
+        :param actFun: activation function
+        :return:
+        """
+        self.X = X
+        self.z = np.dot(self.X, self.W) + self.b
+        self.a = self.actFun(self.z)
+        return self.a
+
+    def backprop(self, d):
+        """
+        :param delta: The delta from previous layer without modification by activation.
+        :return: The delta times the weights without activation
+        """
+        da = self.diff_actFun(self.z)
+        delta = d * da
+        self.dW = np.dot(self.X.T, delta) + self.reg_lambda * self.W
+        self.db = np.sum(delta, axis=0)
+
+        return np.dot(delta, self.W.T)  # Which will be the new delta for the proceeding layers.
+
+    def descent_update(self, epsilon):
+        # Gradient descent parameter update
+        self.W += -epsilon * self.dW
+        self.b += -epsilon * self.db
+
+class FinalLayer(Layer):
+
+    def __init__(self, input_size, output_size, reg_lambda=0.01, seed=0):
+        super(FinalLayer, self).__init__(input_size, output_size, 'linear',
+                                           reg_lambda, seed)
+        self.p = None
+
+    def actFun(self, z):
+        '''
+        actFun computes the sofmtax activation functions
+        :param z: net input
+        :return: activations
+        '''
+        exp_scores = np.exp(z - np.max(z))
+        return exp_scores / (np.sum(exp_scores, axis=1, keepdims=True))
+
+    def diff_actFun(self, z):
+        '''
+        diff_actFun computes the derivatives of the softmax functions wrt the layer input
+        :param z: net input
+        :return: NOTE THIS SHOULD NOT BE USED FOR THE FINAL LAYER.
+        The only suitable func is softmax.
+        '''
+
+        raise ValueError("Softmax is only meant to be used as final layer")
+
+    def backprop(self, y):
+        """
+        Implementing backpropagation to adjust the parameters after the feedforward step.
+        :param x: input data
+        :param y: given labels - Shape (samples,)
+        """
+        num_examples = len(self.X)
+        delta = self.a
+        delta[range(num_examples), y] -= 1
+
+        dregW = (self.reg_lambda * self.W)
+        self.dW = np.dot(self.X.T, delta) + dregW
+        self.db = np.sum(delta, axis=0)
+
+        return np.dot(delta, self.W.T)
+
+class DeepNeuralNetwork(NeuralNetwork):
+    """
+    This is a Deep Neural Net which takes in a Neural Net.
+    """
+    def __init__(self, layers):
+        self.input_dim = layers[0].input
+        self.output_dim = layers[-1].output
+        self.hidden_layers = layers
+        self.p = None
+
+        # self.hidden_layers = []
+
+    def feedforward(self, X):
+        """
+        The feedforward implementation for this thing
+        :param X:
+        :return:
+        """
+        assert self.input_dim == X.shape[1], "Input size %s but passed array with %s cells" \
+                                            % (self.input_dim, X.shape[1])
+        inter = X
+        for layer in self.hidden_layers:
+            inter = layer.feedforward(inter)
+        self.p = inter
+        return inter
+
+    def backprop(self, y):
+        """
+        Backpropagation algorithm for this neural net
+        :param y:
+        :return: none
+        """
+        delta = y
+        for layer in reversed(self.hidden_layers): # we can just delegate back to each composee
+            delta = layer.backprop(delta)
+
+    def fit_model(self, X, y, epsilon=0.01, num_passes=20000, print_loss=True):
+        """
+        fit_model uses backpropagation to train the network
+        :param X: input data
+        :param y: given labels
+        :param num_passes: the number of times that the algorithm runs through the whole dataset
+        :param print_loss: print the loss or not
+        :return:
+        """
+        # Gradient descent.
+        for i in range(0, num_passes):
+            # Forward propagation
+            self.feedforward(X)
+            # Backpropagation
+            self.backprop(y)
+            for layer in self.hidden_layers:
+                layer.descent_update(epsilon) # This function does the regularization and updating.
+            # Optionally print the loss.
+            # This is expensive because it uses the whole dataset, so don't want to do it too often.
+            if print_loss and i % 1000 == 0:
+                print("Loss after iteration %i: %f" % (i, self.calculate_loss(X, y)))
+
+    def calculate_loss(self, X, y):
+        '''
+        calculate_loss computes the loss for prediction
+        :param X: input data
+        :param y: given labels - Shape (samples,)
+        :return: the loss for prediction
+        '''
+        num_examples = len(X)
+        # Forward propagation
+        self.feedforward(X)
+        data_loss = np.sum(-np.log(self.p[np.arange(num_examples), y]))
+        return (1.0 / num_examples) * data_loss
+
+    def predict(self, X):
+        '''
+        predict infers the label of a given data point X
+        :param X: input data
+        :return: label inferred
+        '''
+        self.feedforward(X)
+        return np.argmax(self.p, axis=1)
+
 
 def main():
-    # Specify training parameters
-    result_dir = './results/' # directory where the results from the training are saved
-    max_step = 5500 # the maximum iterations. After max_step iterations, the training will stop no matter what
+    # # generate and visualize Make-Moons dataset
+    # X, y = generate_data()
+    X, y = get_circles()
+    # plt.scatter(X[:, 0], X[:, 1], s=40, c=y, cmap=plt.cm.Spectral)
+    # plt.show()
+    sizes = [X.shape[1], 10, 10, 6, 4, 3, 3, 3, 3, 3]
+    layers = []
+    for i in range(len(sizes) - 1):
+        layers.append(Layer(sizes[i], sizes[i + 1], "tanh"))
+    layers.append(FinalLayer(sizes[-1], 2)) # have to add the last layer!
+    model = DeepNeuralNetwork(layers)
 
-    start_time = time.time() # start timing
-
-    # FILL IN THE CODE BELOW TO BUILD YOUR NETWORK
-
-    # placeholders for input data and input labeles
-    x = tf.compat.v1.placeholder(tf.float32, [None, 784], name='x')
-    y_ = tf.compat.v1.placeholder(tf.float32, [None, 10], name='y_')
-
-    # reshape the input image
-    x_image = tf.compat.v1.reshape(x, [-1, 28, 28, 1])
-
-    # Layer 1 (Conv)
-    W_conv1 = weight_variable([5, 5, 1, 32])
-    b_conv1 = bias_variable([32])
-
-    h_conv1 = tf.nn.sigmoid(conv2d(x_image, W_conv1) + b_conv1)
-    h_pool1 = max_pool_2x2(h_conv1)
-
-    # Layer 2 (Conv)
-    W_conv2 = weight_variable([5, 5, 32, 64])
-    b_conv2 = bias_variable([64])
-
-    h_conv2 = tf.nn.sigmoid(conv2d(h_pool1, W_conv2) + b_conv2)
-    h_pool2 = max_pool_2x2(h_conv2)
-
-    # Layer 3 (Dense)
-    W_fc1 = weight_variable([7 * 7 * 64, 1024])
-    b_fc1 = bias_variable([1024])
-    h_pool2_flat = tf.reshape(h_pool2, [-1, 7 * 7 * 64])
-    h_fc1 = tf.nn.sigmoid(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
-
-    # dropout
-    keep_prob = tf.placeholder(tf.float32)
-    h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
-
-    # Layer 4 (softmax)
-    W_fc2 = weight_variable([1024, 10]) #
-    b_fc2 = bias_variable([10]) # Ten dimensions
-    y_conv = tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2, name='y')
-
-    # FILL IN THE FOLLOWING CODE TO SET UP THE TRAINING
-
-    # setup training
-    cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y_conv), reduction_indices=[1]))
-    optimizer = tf.train.AdamOptimizer(1e-4)
-    train_step = optimizer.minimize(cross_entropy)
-    correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
-    model_accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
-
-    # Add a scalar summary for the snapshot loss.
-    # tf.summary.scalar(cross_entropy.op.name, cross_entropy)
-    correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
-    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-    tf.summary.scalar("Loss", cross_entropy)
-    tf.summary.scalar("Accuracy", model_accuracy)
-    tf.summary.scalar("Learning rate", optimizer._lr)
-
-    # Add histogram
-    # The weights
-    tf.summary.histogram("W1", W_conv1)
-    tf.summary.histogram("W2", W_conv2)
-    tf.summary.histogram("Fully connected W1", W_fc1)
-    tf.summary.histogram("Fully connected W2", W_fc2)
-    # The biases
-    tf.summary.histogram("b1", b_conv1)
-    tf.summary.histogram("b2", b_conv2)
-    tf.summary.histogram("Fully connected bias 1", b_fc1)
-    tf.summary.histogram("Fully connected bias 1", b_fc2)
-    # The pool activations
-    tf.summary.histogram("Activation for Pool 1", h_pool1)
-    tf.summary.histogram("Activation for Pool 2", h_pool2)
-    tf.summary.histogram("Activation for fully connected Pool 1", h_fc1)
-    # Output
-    tf.summary.histogram("Final Output", y_conv)
-
-    # Build the summary operation based on the TF collection of Summaries.
-    summary_op = tf.summary.merge_all()
-
-    # Add the variable initializer Op.
-    init = tf.global_variables_initializer()
-
-    # Create a saver for writing training checkpoints.
-    saver = tf.train.Saver()
-
-    # Instantiate a SummaryWriter to output summaries and the Graph.
-    summary_writer = tf.summary.FileWriter(result_dir, sess.graph)
-
-    # Run the Op to initialize the variables.
-    sess.run(init)
-
-    # run the training
-    for i in range(max_step):
-        batch = mnist.train.next_batch(50)  # make the data batch, which is used in the training iteration.the batch
-        # size is 50
-        if i%100 == 0:
-            # output the training accuracy every 100 iterations
-            train_accuracy = accuracy.eval(feed_dict={
-                x:batch[0], y_:batch[1], keep_prob: 1.0})
-            print("step %d, training accuracy %g"%(i, train_accuracy))
-
-            # Update the events file which is used to monitor the training (in this case,
-            # only the training loss is monitored)
-            summary_str = sess.run(summary_op, feed_dict={
-                x: batch[0], y_: batch[1], keep_prob: 0.5})
-            summary_writer.add_summary(summary_str, i)
-            summary_writer.flush()
-
-        # save the checkpoints every 1100 iterations
-        if i % 1100 == 0 or i == max_step:
-            checkpoint_file = os.path.join(result_dir, 'checkpoint')
-            saver.save(sess, checkpoint_file, global_step=i)
-            # print delta of y and y_
-            print("val accuracy %g" % accuracy.eval(feed_dict={
-                x: mnist.validation.images,
-                y_: mnist.validation.labels, keep_prob: 1.0}))
-            # print test error
-            print("test accuracy %g" % accuracy.eval(feed_dict={
-                x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0}))
-
-        train_step.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5}) # run one train_step
-
-    # # print test error
-    # print("test accuracy %g"%accuracy.eval(feed_dict={
-    #     x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0}))
-
-    stop_time = time.time()
-    print('The training takes %f second to finish'%(stop_time - start_time))
+    model.fit_model(X, y, epsilon=0.001, num_passes=50000)
+    model.visualize_decision_boundary(X, y)
 
 
 if __name__ == "__main__":
-    main()
-
-
+  main()
