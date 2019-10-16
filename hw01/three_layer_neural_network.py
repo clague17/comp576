@@ -3,6 +3,8 @@ import numpy as np
 from sklearn import datasets, linear_model
 from scipy.special import expit
 import matplotlib.pyplot as plt
+
+
 def generate_data():
     '''
     generate data
@@ -11,6 +13,8 @@ def generate_data():
     np.random.seed(0)
     X, y = datasets.make_moons(200, noise=0.20) # An array with 200 samples
     return X, y
+
+
 def plot_decision_boundary(pred_func, X, y):
     '''
     plot the decision boundary
@@ -66,6 +70,8 @@ dACTIVATIONS = {'tanh': lambda x: 1 - np.square(np.tanh(x)),
                 'stanh': lambda x: 1.592537 * (1 - np.square(np.tanh(x))),
                 'ramp': lambda x: ((x < 1) * (x > -1)).astype(float),
                 'relu6': lambda x: ((x < 6) * (x > 0)).astype(float)}
+
+
 class NeuralNetwork(object):
     """
     This class builds and trains a neural network
@@ -90,6 +96,7 @@ class NeuralNetwork(object):
         self.b1 = np.zeros((1, self.nn_hidden_dim))
         self.W2 = np.random.randn(self.nn_hidden_dim, self.nn_output_dim) / np.sqrt(self.nn_hidden_dim)
         self.b2 = np.zeros((1, self.nn_output_dim))
+
     def actFun(self, z, type):
         '''
         actFun computes the activation functions
@@ -146,6 +153,7 @@ class NeuralNetwork(object):
         # Add regularization term to loss (optional)
         data_loss += self.reg_lambda / 2 * (np.sum(np.square(self.W1)) + np.sum(np.square(self.W2)))
         return (1. / num_examples) * data_loss
+
     def predict(self, X):
         '''
         predict infers the label of a given data point X
@@ -154,6 +162,7 @@ class NeuralNetwork(object):
         '''
         self.feedforward(X, lambda x: self.actFun(x, type=self.actFun_type))
         return np.argmax(self.probs, axis=1)
+
     def backprop(self, X, y):
         '''
         backprop run backpropagation to compute the gradients used to update the parameters in the backward step
@@ -174,6 +183,7 @@ class NeuralNetwork(object):
         db2 = np.sum(delta3, axis=0)
 
         return dW1, dW2, db1, db2
+
     def fit_model(self, X, y, epsilon=0.01, num_passes=20000, print_loss=True):
         '''
         fit_model uses backpropagation to train the network
@@ -201,6 +211,7 @@ class NeuralNetwork(object):
             # This is expensive because it uses the whole dataset, so we don't want to do it too often.
             if print_loss and i % 1000 == 0:
                 print("Loss after iteration %i: %f" % (i, self.calculate_loss(X, y)))
+
     def visualize_decision_boundary(self, X, y):
         '''
         visualize_decision_boundary plot the decision boundary created by the trained network
@@ -209,14 +220,19 @@ class NeuralNetwork(object):
         :return:
         '''
         plot_decision_boundary(lambda x: self.predict(x), X, y)
+
+
 def main():
     # generate and visualize Make-Moons dataset
     X, y = generate_data()
-    plt.scatter(X[:, 0], X[:, 1], s=40, c=y, cmap=plt.cm.Spectral)
-    plt.show()
-    model = NeuralNetwork(nn_input_dim=2, nn_hidden_dim=3 , nn_output_dim=2, actFun_type='sigmoid')
+    # plt.scatter(X[:, 0], X[:, 1], s=40, c=y, cmap=plt.cm.Spectral)
+    # plt.show()
+    model = NeuralNetwork(nn_input_dim=2, nn_hidden_dim=100 , nn_output_dim=2, actFun_type='tanh')
     model.fit_model(X,y)
     model.feedforward(X, lambda x: model.actFun(x, type=model.actFun_type))
     model.visualize_decision_boundary(X,y)
+
+
 if __name__ == "__main__":
     main()
+
