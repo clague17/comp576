@@ -1,6 +1,8 @@
 import tensorflow as tf
 from tensorflow.python.ops import rnn, rnn_cell
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
+
 
 
 from tensorflow.examples.tutorials.mnist import input_data
@@ -35,7 +37,7 @@ def RNN(x, weights, biases, gru=False):
     x = tf.unstack(x, nSteps, 1)
 
     # find which lstm to use in the documentation
-    lstmCell = rnn.GruCell(nHidden) if gru else rnn.BasicLSTMCell(nHidden)
+    lstmCell = rnn.GRUCell(nHidden) if gru else rnn.BasicLSTMCell(nHidden)
 
     # for the rnn where to get the output and hidden state
     outputs, states = tf.nn.static_rnn(lstmCell, x, dtype=tf.float32)
@@ -43,7 +45,7 @@ def RNN(x, weights, biases, gru=False):
     return tf.matmul(outputs[-1], weights['out']) + biases['out']
 
 
-pred = RNN(x, weights, biases, use_gru=True)
+pred = RNN(x, weights, biases, gru=False)
 
 # optimization
 # create the cost, optimization, evaluation, and accuracy
@@ -58,9 +60,15 @@ accuracy = tf.reduce_mean(tf.cast(correctPred, tf.float32))
 
 init = tf.global_variables_initializer()
 
+testData = mnist.test.images.reshape((-1, nSteps, nInput))
+testLabel = mnist.test.labels
+
 with tf.Session() as sess:
     sess.run(init)
+
+    writer = SummaryWriter()
     step = 1
+    counter = 1
 
     while step * batchSize < trainingIters:
         # mnist has a way to get the next batch
@@ -70,15 +78,21 @@ with tf.Session() as sess:
         sess.run(optimizer, feed_dict={x: batchX, y: batchY})
 
         if step % displayStep == 0:
+            counter += 1
             # Running the training
             acc = accuracy.eval(feed_dict={x: batchX, y: batchY})
             loss = cost.eval(feed_dict={x: batchX, y: batchY})
-            print("Iter " + str(step * batchSize) + ", Minibatch Loss= " +
-                  "{:.6f}".format(loss) + ", Training Accuracy= " +
-                  "{:.5f}".format(acc))
+            writer.add_scalar("Training Accuracy", acc, counter)
+            writer.add_scalar("Training Loss", loss, counter)
+            # print("Iter " + str(step * batchSize) + ", Minibatch Loss= " +
+            #       "{:.6f}".format(loss) + ", Training Accuracy= " +
+            #       "{:.5f}".format(acc))
+            test_acc = accuracy.eval(feed_dict={x: testData, y: testLabel})
+            writer.add_scalar("Testing Accuracy", test_acc, counter)
         step += 1
-    print('Optimization finished')
 
-    testData = mnist.test.images.reshape((-1, nSteps, nInput))
-    testLabel = mnist.test.labels
+    print('Optimization finished')
     print("Testing Accuracy:", sess.run(accuracy, feed_dict={x: testData, y: testLabel}))
+
+
+

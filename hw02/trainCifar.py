@@ -1,6 +1,7 @@
 from scipy import misc
 import os
 import math
+import torch
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm # This import is for visualization and better printing :)
@@ -95,7 +96,7 @@ class checkpoint:
 
     def poll(self, new_val):
         if new_val >= self.cur_max:
-            print("BETTER MODEl ACCURACY]: ", new_val, "- saving model.")
+            print("[BETTER MODEl ACCURACY]: ", new_val, "- saving model.")
             self.saver.save(sess, os.path.join(cwd, self.save_to))
             self.cur_max = new_val
 
@@ -138,14 +139,13 @@ tf_labels = tf.placeholder(tf.float32, shape=[None, nclass])#tf variable for lab
 
 # model
 #create your model
-x = tf_data
 # conv_prob is used for the dropout
 conv_prob =  tf.placeholder(tf.float32)
 
 # First layer: 5x5 / 32 filters, ReLu activation
 W1 = weight_variable([5, 5, 1, 32])
 b1 = bias_variable([32])
-h1 = tf.nn.relu(conv2d(x, W1) + b1)
+h1 = tf.nn.relu(conv2d(tf_data, W1) + b1)
 
 var_log("W1", W1)
 var_log("b1", b1)
@@ -161,28 +161,29 @@ W2 = weight_variable([5, 5, 32, 64])
 b2 = bias_variable([64])
 h2 = tf.nn.relu(conv2d(h_pool1_dropout, W2) + b2)
 h_pool2 = max_pool_2x2(h2)
+h_pool2_dropoff = tf.nn.dropout(h_pool2, conv_prob)
 
 var_log("W2", W2)
 var_log("b2", b2)
 var_log("h2", h2)
 var_log("h_pool2", h_pool2)
 
-h_pool2_dropoff = tf.nn.dropout(h_pool2, conv_prob)
-
+# fully connected layer
 # Layer 3: 7x7x64 in / 1024 out
-fc1_W = weight_variable([7*7*64, 1024])
+flat_shape = 7 * 7 * 64
+fc1_W = weight_variable([flat_shape, 1024])
 fc1_b = bias_variable([1024])
-h_pool2_flat = tf.reshape(h_pool2_dropoff, [-1, 7 * 7 * 64])
+h_pool2_flat = tf.reshape(h_pool2_dropoff, [-1, flat_shape])
 fc1_h = tf.matmul(h_pool2_flat, fc1_W) + fc1_b
 
 fc1_h_dropout = tf.nn.dropout(fc1_h, conv_prob)
 
+# Fully Connected layer
 #Layer 4: 1024 in / 10 out
 fc2_W = weight_variable([1024, 10])
 fc2_b = bias_variable([10])
 y_conv = tf.matmul(fc1_h_dropout, fc2_W) + fc2_b
 
-fc1_h_dropout = tf.nn.dropout(fc1_h, conv_prob)
 conv_out = h_pool2_dropoff
 
 var_log("fc2_W", fc2_W)
@@ -194,7 +195,7 @@ var_log("y_conv", y_conv)
 # set up the loss, optimization, evaluation, and accuracy
 # setup training
 # --------------------------------------------------
-learn_rate = .003 # MODIFIED this learning rate as a variable for accuracy.
+learn_rate = .001 # MODIFIED this learning rate as a variable for accuracy.
 cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tf_labels, logits=y_conv))
 optimizer = tf.train.AdamOptimizer(learn_rate).minimize(cross_entropy)
 
@@ -204,14 +205,16 @@ accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 tf.summary.scalar("Loss", cross_entropy)
 tf.summary.scalar("Accuracy", accuracy)
 
-
-# --------------------------------------------------
-# optimization
-sess.run(tf.global_variables_initializer())
 # Set up the summary writer
 result_dir = os.path.join(cwd, output_dir)
 summary_op = tf.summary.merge_all()
 summary_writer = tf.summary.FileWriter(result_dir, sess.graph)
+
+
+# --------------------------------------------------
+# optimization
+sess.run(tf.global_variables_initializer())
+
 # Create model checkpointer
 checkpointer = checkpoint("cifar10-best", sess)
 
@@ -219,66 +222,59 @@ batch_xs = np.empty((batchsize, imsize, imsize, nchannels))
 batch_ys = np.zeros((batchsize, nclass))
 nsamples = ntrain * nclass
 # batch indices
-perm = np.arange(nsamples)
 periods = 50
 
-for i in range(periods):
-    print("Iteration {}/{}".format(i + 1, periods))
+for i in range(12000):
+    perm = np.arange(nsamples)
     np.random.shuffle(perm)
+    for j in range(batchsize):
+        batch_ys[j, :] = LTrain[perm[j], :]
+        batch_xs[j, :, :, :] = Train[perm[j], :, :, :]
     if i % 10 == 0:
-        # calculate train accuracy and loss
-        loss, acc = sess.run([cost, accuracy],
-                             feed_dict={tf_data: batch_xs, tf_labels: batch_ys, keep_prob: 1.0})
-        train_loss.append(loss)
-        train_accuracy.append(acc)
-
-        summary_str = sess.run(summary_op,
-                               feed_dict={tf_data: Test, tf_labels: LTest, keep_prob: 1.0})
+        train_accuracy, train_loss = sess.run([accuracy, cross_entropy], feed_dict={
+            tf_data: batch_xs, tf_labels: batch_ys, conv_prob: 1.0})
+        summary_str = sess.run(summary_op, feed_dict={
+            tf_data: batch_xs, tf_labels: batch_ys, conv_prob: 1.0})
         summary_writer.add_summary(summary_str, i)
         summary_writer.flush()
-
-        # calculate test accuracy
-        test_acc = accuracy.eval(feed_dict={tf_data: Test, tf_labels: LTest, keep_prob: 1.0})
-        test_accuracy.append(test_acc)
-
-
-for i in range(periods):
-    print("Iteration {}/{}".format(i + 1, periods))
-    train_acc_counter = 0
-    # Shuffle the indices
-    np.random.shuffle(perm)
-    for j in tqdm(range(0, nsamples, batchsize)):
-        chunk = perm[j : j + batchsize]
-        batch_xs = Train[chunk]
-        batch_ys = LTrain[chunk]
-        # output the training accuracy every <batchsize> iterations
-        train_accuracy = accuracy.eval(feed_dict={
-            tf_data: batch_xs, tf_labels: batch_ys, conv_prob: 1.0})
-        train_acc_counter += (train_accuracy * len(batch_xs))
-        # Collect the summary statistics
+        test_acc = accuracy.eval(
+            feed_dict={tf_data: Test, tf_labels: LTest, conv_prob: 1.0})
+        # Collect the summary statistics on test data
         summary_str = sess.run(summary_op, feed_dict={
-                               tf_data: batch_xs, tf_labels: batch_ys, conv_prob: 1.0})
-        summary_writer.add_summary(summary_str, i + j / nsamples)
+            tf_data: Test, tf_labels: LTest, conv_prob: 1.0})
+        summary_writer.add_summary(summary_str, i)
         summary_writer.flush()
-        # dropout only during training
-        optimizer.run(feed_dict={
-            tf_data: batch_xs, tf_labels: batch_ys, conv_prob: 0.5})
-    print("Train Accuracy so far: {}".format(train_acc_counter / nsamples))
-    test_acc = accuracy.eval(
-        feed_dict={tf_data: Test, tf_labels: LTest, conv_prob: 1.0})
-    # Collect the summary statistics on test data
-    summary_str = sess.run(summary_op, feed_dict={
-                           tf_data: Test, tf_labels: LTest, conv_prob: 1.0})
-    summary_writer.add_summary(summary_str, i)
-    summary_writer.flush()
-    print("Test accuracy %g" % test_acc)
-    checkpointer.poll(test_acc)
+    if i % 100 == 0:
+        # print stuff
+        # print("iteration: " + str(i) + ", loss= " + "{:.6f}".format(
+        #     train_loss) + ", Training Accuracy= " + "{:.5f}".format(train_accuracy))
+        # print("test accuracy: ", "{:5f}".format(test_acc))
+        checkpointer.poll(test_acc)
+    # dropout only during training
+    optimizer.run(feed_dict={
+        tf_data: batch_xs, tf_labels: batch_ys, conv_prob: 0.5})
 
 # test
 print("test accuracy %g"%accuracy.eval(feed_dict={tf_data: Test, tf_labels: LTest, conv_prob: 1.0}))
 
 # first layer weights / filters
+layer_weights = W1.eval()
+
+for i in range(32):
+    plt.subplot(4, 8, i + 1)
+    plt.imshow(layer_weights[:, :, 0, i], cmap="gray")
+    plt.title("Filter " + str(i + 1))
+    plt.axis("off")
+plt.show()
+
+second_layer = W2.eval()
+
+for i in range(32):
+    plt.subplot(4, 8, i + 1)
+    plt.imshow(second_layer[:, :, 0, i], cmap="gray")
+    plt.title("Filter " + str(i + 1))
+    plt.axis("off")
 
 
-
+plt.show()
 sess.close()
