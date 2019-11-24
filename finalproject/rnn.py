@@ -1,14 +1,42 @@
 import tensorflow as tf
-from tensorflow.python.ops import rnn, rnn_cell
+import tensorflow_datasets as tfds
+# from tensorflow.python.ops import rnn, rnn_cell
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 
-
-from tensorflow.examples.tutorials.mnist import input_data
+# from tensorflow.examples.tutorials.mnist import input_data
 from tensorflow.contrib import rnn
 
-mnist = input_data.read_data_sets('MNIST_data/', one_hot=True)
+# mnist = input_data.read_data_sets('MNIST_data/', one_hot=True)
+
+########## groove starter code ###################
+
+# tfds works in both Eager and Graph modes
+tf.enable_eager_execution()
+
+# Load the full GMD with MIDI only (no audio) as a tf.data.Dataset
+dataset = tfds.load(
+    name="groove/2bar-midionly",
+    split=tfds.Split.TRAIN,
+    try_gcs=True)
+
+print("loaded dataset")
+
+# Build your input pipeline
+dataset = dataset.shuffle(1024).batch(32).prefetch(
+    tf.data.experimental.AUTOTUNE)
+i = 0
+for features in dataset.take(1):
+    # Access the features you are interested in
+    midi, genre = features["midi"], features["style"]["primary"]
+    if i < 100:
+      print(midi, genre)
+
+
+
+
+##################################################
 
 learningRate = .003
 trainingIters = 100000
@@ -44,7 +72,7 @@ def RNN(x, weights, biases, gru=False):
 
     return tf.matmul(outputs[-1], weights['out']) + biases['out']
 
-
+"""
 pred = RNN(x, weights, biases, gru=False)
 
 # optimization
@@ -62,7 +90,8 @@ init = tf.global_variables_initializer()
 
 testData = mnist.test.images.reshape((-1, nSteps, nInput))
 testLabel = mnist.test.labels
-
+"""
+"""
 with tf.Session() as sess:
     sess.run(init)
 
@@ -93,5 +122,5 @@ with tf.Session() as sess:
 
     print('Optimization finished')
     print("Testing Accuracy:", sess.run(accuracy, feed_dict={x: testData, y: testLabel}))
-
+"""
 
